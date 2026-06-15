@@ -114,8 +114,27 @@ from api.v1.schemas.decision_signals import (
     DecisionSignalMutationResponse,
     DecisionSignalStatusUpdateRequest,
 )
+from api.v1.schemas.sector_inflection import (
+    SectorDashboardItem,
+    SectorDashboardResponse,
+    SectorHistoryItem,
+    SectorHistoryResponse,
+    SectorScanRequest,
+    SectorScanResponse,
+    SectorPoolItem,
+    SectorPoolCreateRequest,
+)
 
 __all__ = [
+    # sector inflection
+    "SectorDashboardItem",
+    "SectorDashboardResponse",
+    "SectorHistoryItem",
+    "SectorHistoryResponse",
+    "SectorScanRequest",
+    "SectorScanResponse",
+    "SectorPoolItem",
+    "SectorPoolCreateRequest",
     # common
     "RootResponse",
     "HealthResponse",

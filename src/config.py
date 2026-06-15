@@ -640,6 +640,11 @@ class Config:
     alphasift_enabled: bool = False
     alphasift_install_spec: str = DEFAULT_ALPHASIFT_INSTALL_SPEC
 
+    # === 板块拐点扫描 ===
+    sector_scan_enabled: bool = False
+    sector_scan_benchmark: str = "000300"
+    sector_scan_notify: bool = True
+
     # === AI 分析配置 ===
     # LiteLLM unified model config (provider/model format, e.g. gemini/gemini-3.1-pro-preview)
     litellm_model: str = ""  # Primary model; must include provider prefix when set explicitly
@@ -1815,6 +1820,9 @@ class Config:
                 if os.getenv('ALPHASIFT_INSTALL_SPEC') is None
                 else os.getenv('ALPHASIFT_INSTALL_SPEC', '').strip()
             ),
+            sector_scan_enabled=parse_env_bool(os.getenv('SECTOR_SCAN_ENABLED'), default=False),
+            sector_scan_benchmark=os.getenv('SECTOR_SCAN_BENCHMARK', '000300').strip(),
+            sector_scan_notify=parse_env_bool(os.getenv('SECTOR_SCAN_NOTIFY'), default=True),
         )
     
     @classmethod

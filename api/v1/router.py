@@ -22,13 +22,14 @@ from api.v1.endpoints import (
     health,
     history,
     portfolio,
+    sector_inflection,
     stocks,
     system_config,
     usage,
 )
 
 # 创建 v1 版本主路由
-router = APIRouter(prefix="/api/v1")
+router = APIRouter()
 
 router.include_router(
     auth.router,
@@ -100,6 +101,12 @@ router.include_router(
     alphasift.router,
     prefix="/alphasift",
     tags=["AlphaSift"]
+)
+
+router.include_router(
+    sector_inflection.router,
+    prefix="/sector",
+    tags=["SectorInflection"]
 )
 
 router.include_router(

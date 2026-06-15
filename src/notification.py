@@ -2430,6 +2430,23 @@ class NotificationService(
         logger.info(f"日报已保存到: {filepath}")
         return str(filepath)
 
+    def send_sector_inflection_report(
+        self,
+        regime_status: str,
+        transitions: List[Tuple[str, str, str, str, int, int]],
+        all_results: List[Dict[str, Any]],
+        trade_date: Any
+    ) -> bool:
+        """
+        发送板块拐点扫描报告
+        """
+        report = NotificationBuilder.build_sector_inflection_report(
+            regime_status, transitions, all_results, trade_date
+        )
+        date_str = trade_date.strftime('%Y%m%d') if hasattr(trade_date, 'strftime') else str(trade_date).replace('-', '')
+        self.save_report_to_file(report, f"sector_report_{date_str}.md")
+        return self.send(report, route_type="report")
+
 
 class NotificationBuilder:
     """
@@ -2483,6 +2500,92 @@ class NotificationBuilder:
                 f"{labels['score_label']} {r.sentiment_score}"
             )
         
+        return "\n".join(lines)
+
+    @staticmethod
+    def build_sector_inflection_report(
+        regime_status: str,
+        transitions: List[Tuple[str, str, str, str, int, int]],
+        all_results: List[Dict[str, Any]],
+        trade_date: Any
+    ) -> str:
+        """
+        构建板块拐点报告的 Markdown 内容
+        """
+        regime_status_str = "🟢 风险 ON (沪深300 > MA200)" if regime_status == "risk_on" else "🔴 风险 OFF (沪深300 < MA200)"
+        
+        # 汉化状态名
+        state_names = {
+            "scanning": "扫描",
+            "lurking": "潜伏观察",
+            "holding": "持有",
+            "alert": "警戒持有",
+            "exited": "卖出离场"
+        }
+
+        # 1. 组装 Markdown 消息
+        lines = [
+            f"🔄 **A股 ETF 板块拐点捕捉报告 ({trade_date})**",
+            f"大盘总开关: **{regime_status_str}**",
+            "",
+            "📊 **状态变更提醒**"
+        ]
+
+        if transitions:
+            for name, code, prev_st, new_st, ign_sc, dist_sc in transitions:
+                prev_zh = state_names.get(prev_st, prev_st)
+                new_zh = state_names.get(new_st, new_st)
+                
+                emoji = "🔵"
+                if new_st == "holding":
+                    emoji = "🟢"
+                elif new_st == "alert":
+                    emoji = "⚠️"
+                elif new_st == "exited":
+                    emoji = "🔴"
+                elif new_st == "lurking":
+                    emoji = "🟡"
+
+                score_info = f"启动分 {ign_sc}" if new_st in ("lurking", "holding") else f"见顶分 {dist_sc}"
+                lines.append(f"{emoji} **{name}({code})**: {prev_zh} ➔ **{new_zh}** | {score_info}")
+        else:
+            lines.append("无状态变更板块")
+
+        lines.extend([
+            "",
+            "📈 **观察与持仓列表**"
+        ])
+
+        # 按状态分组列出所有板块
+        holding_list = []
+        lurk_list = []
+        alert_list = []
+
+        for res in all_results:
+            name, code = res["sector_name"], res["etf_code"]
+            st = res["state"]
+            ign, dist = res["ignition_score"], res["distribution_score"]
+
+            if st == "holding":
+                holding_list.append(f"- {name}({code}): 持有中 | 见顶评分: {dist}")
+            elif st == "lurking":
+                lurk_list.append(f"- {name}({code}): 潜伏中 | 启动评分: {ign}")
+            elif st == "alert":
+                alert_list.append(f"- {name}({code}): ⚠️ 警戒持有中 | 见顶评分: {dist}")
+
+        if alert_list:
+            lines.append("**⚠️ 警戒持有板块:**")
+            lines.extend(alert_list)
+        if holding_list:
+            lines.append("**🟢 持有板块:**")
+            lines.extend(holding_list)
+        if lurk_list:
+            lines.append("**🟡 潜伏观察板块:**")
+            lines.extend(lurk_list)
+
+        if not alert_list and not holding_list and not lurk_list:
+            lines.append("当前所有板块均在扫描等待状态。")
+
         return "\n".join(lines)
 
 

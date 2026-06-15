@@ -850,6 +850,50 @@ class DecisionSignalRecord(Base):
     )
 
 
+class SectorETFPool(Base):
+    """可配置的板块 ETF 标的池"""
+    __tablename__ = 'sector_etf_pool'
+
+    id = Column(Integer, primary_key=True)
+    etf_code = Column(String(10), nullable=False, unique=True, index=True)
+    sector_name = Column(String(50), nullable=False)
+    category = Column(String(20))       # "industry" / "theme" / "safe_haven"
+    benchmark_index = Column(String(10)) # 对应的成分股指数代码 (如 "399976")
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+
+class SectorInflectionState(Base):
+    """板块交易指标评分及状态持久化"""
+    __tablename__ = 'sector_inflection_state'
+
+    id = Column(Integer, primary_key=True)
+    etf_code = Column(String(10), nullable=False, index=True)
+    sector_name = Column(String(50), nullable=False)
+    trade_date = Column(Date, nullable=False, index=True)
+    
+    # 评分
+    ignition_score = Column(Integer)
+    distribution_score = Column(Integer)
+    ignition_details = Column(Text)       # JSON 字符串存储
+    distribution_details = Column(Text)   # JSON 字符串存储
+    
+    # 状态机
+    state = Column(String(20), nullable=False)  # SectorState 枚举值
+    prev_state = Column(String(20))
+    state_reason = Column(Text)
+    state_entered_date = Column(Date)
+    
+    # 大盘环境
+    market_regime = Column(String(10))  # risk_on / risk_off
+    
+    created_at = Column(DateTime, default=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint('etf_code', 'trade_date', name='uix_sector_etf_date'),
+    )
+
+
 class _DatabaseManagerMeta(type):
     """Serialize DatabaseManager construction across __new__ and __init__."""
 
@@ -1133,10 +1177,123 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             raise
         finally:
             session.close()
-    
+
+    def get_active_sector_etfs(self) -> List[SectorETFPool]:
+        """
+        获取当前激活的板块 ETF 池，若为空则自动进行默认初始化。
+        """
+        with self.get_session() as session:
+            etfs = session.query(SectorETFPool).filter(SectorETFPool.is_active == True).all()
+            if etfs:
+                return etfs
+
+        # 如果为空，进行自动初始化（Bootstrap）
+        logger.info("板块 ETF 池为空，正在进行默认初始化...")
+        from src.sector.sector_data import DEFAULT_ETF_POOL, SAFE_HAVEN_ETFS
+
+        def _bootstrap(session: Session) -> None:
+            # 插入默认行业 ETF
+            for code, info in DEFAULT_ETF_POOL.items():
+                pool_item = SectorETFPool(
+                    etf_code=code,
+                    sector_name=info["name"],
+                    category=info["category"],
+                    benchmark_index=info["index"],
+                    is_active=True
+                )
+                session.add(pool_item)
+            # 插入默认避险 ETF
+            for code, info in SAFE_HAVEN_ETFS.items():
+                pool_item = SectorETFPool(
+                    etf_code=code,
+                    sector_name=info["name"],
+                    category=info["category"],
+                    benchmark_index=info["index"],
+                    is_active=True
+                )
+                session.add(pool_item)
+
+        self._run_write_transaction("bootstrap_sector_etf_pool", _bootstrap)
+        
+        with self.get_session() as session:
+            return session.query(SectorETFPool).filter(SectorETFPool.is_active == True).all()
+
+    def save_sector_inflection_state(
+        self,
+        etf_code: str,
+        sector_name: str,
+        trade_date: date,
+        ignition_score: int,
+        distribution_score: int,
+        ignition_details: Dict[str, Any],
+        distribution_details: Dict[str, Any],
+        state: str,
+        prev_state: Optional[str],
+        state_reason: str,
+        state_entered_date: date,
+        market_regime: str
+    ) -> None:
+        """
+        持久化保存/更新板块拐点状态
+        """
+        def _write(session: Session) -> None:
+            # 检查是否已有同天该板块的记录
+            existing = session.query(SectorInflectionState).filter(
+                and_(
+                    SectorInflectionState.etf_code == etf_code,
+                    SectorInflectionState.trade_date == trade_date
+                )
+            ).first()
+
+            if existing:
+                existing.ignition_score = ignition_score
+                existing.distribution_score = distribution_score
+                existing.ignition_details = json.dumps(ignition_details, ensure_ascii=False)
+                existing.distribution_details = json.dumps(distribution_details, ensure_ascii=False)
+                existing.state = state
+                existing.prev_state = prev_state
+                existing.state_reason = state_reason
+                existing.state_entered_date = state_entered_date
+                existing.market_regime = market_regime
+            else:
+                record = SectorInflectionState(
+                    etf_code=etf_code,
+                    sector_name=sector_name,
+                    trade_date=trade_date,
+                    ignition_score=ignition_score,
+                    distribution_score=distribution_score,
+                    ignition_details=json.dumps(ignition_details, ensure_ascii=False),
+                    distribution_details=json.dumps(distribution_details, ensure_ascii=False),
+                    state=state,
+                    prev_state=prev_state,
+                    state_reason=state_reason,
+                    state_entered_date=state_entered_date,
+                    market_regime=market_regime
+                )
+                session.add(record)
+
+        self._run_write_transaction("save_sector_inflection_state", _write)
+
+    def get_latest_sector_inflection_state(self, etf_code: str) -> Optional[SectorInflectionState]:
+        """
+        获取板块最近一日的状态记录
+        """
+        with self.get_session() as session:
+            return session.query(SectorInflectionState).filter(
+                SectorInflectionState.etf_code == etf_code
+            ).order_by(desc(SectorInflectionState.trade_date)).first()
+
+    def get_sector_inflection_history(self, etf_code: str, limit: int = 60) -> List[SectorInflectionState]:
+        """
+        获取板块的历史指标记录列表
+        """
+        with self.get_session() as session:
+            return session.query(SectorInflectionState).filter(
+                SectorInflectionState.etf_code == etf_code
+            ).order_by(desc(SectorInflectionState.trade_date)).limit(limit).all()
+
     def has_today_data(self, code: str, target_date: Optional[date] = None) -> bool:
         """
-        检查是否已有指定日期的数据
         
         用于断点续传逻辑：如果已有数据则跳过网络请求
         

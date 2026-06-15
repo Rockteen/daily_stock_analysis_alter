@@ -416,6 +416,18 @@ def parse_arguments() -> argparse.Namespace:
         help='强制回测（即使已有回测结果也重新计算）'
     )
 
+    # === Sector Inflection ===
+    parser.add_argument(
+        '--sector-scan',
+        action='store_true',
+        help='运行板块拐点扫描'
+    )
+    parser.add_argument(
+        '--sector-scan-only',
+        action='store_true',
+        help='仅运行板块拐点扫描，不执行个股分析'
+    )
+
     return parser.parse_args()
 
 
@@ -964,6 +976,16 @@ def run_full_analysis(
         except Exception as e:
             logger.warning(f"自动回测失败（已忽略）: {e}")
 
+        # === 新增：板块拐点扫描 ===
+        try:
+            if getattr(config, 'sector_scan_enabled', False) or getattr(args, 'sector_scan', False):
+                logger.info("开始板块拐点扫描...")
+                from src.services.sector_inflection_service import SectorInflectionService
+                sector_service = SectorInflectionService()
+                sector_service.run_daily_scan()
+        except Exception as e:
+            logger.warning(f"板块拐点扫描失败（已忽略）: {e}")
+
     except Exception as e:
         logger.exception(f"分析流程执行失败: {e}")
 
@@ -1214,6 +1236,14 @@ def main() -> int:
                 f"回测完成: processed={stats.get('processed')} saved={stats.get('saved')} "
                 f"completed={stats.get('completed')} insufficient={stats.get('insufficient')} errors={stats.get('errors')}"
             )
+            return 0
+
+        # 模式1.5: 仅板块拐点扫描
+        if getattr(args, 'sector_scan_only', False):
+            logger.info("模式: 仅板块拐点扫描")
+            from src.services.sector_inflection_service import SectorInflectionService
+            sector_service = SectorInflectionService()
+            sector_service.run_daily_scan(force=True)
             return 0
 
         # 模式1: 仅大盘复盘
