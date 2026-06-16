@@ -428,6 +428,18 @@ def parse_arguments() -> argparse.Namespace:
         help='仅运行板块拐点扫描，不执行个股分析'
     )
 
+    # === Industry Chain ===
+    parser.add_argument(
+        '--chain-scan',
+        action='store_true',
+        help='运行 AI 产业链扫描'
+    )
+    parser.add_argument(
+        '--chain-scan-only',
+        action='store_true',
+        help='仅运行 AI 产业链扫描，不执行个股分析'
+    )
+
     return parser.parse_args()
 
 
@@ -986,6 +998,17 @@ def run_full_analysis(
         except Exception as e:
             logger.warning(f"板块拐点扫描失败（已忽略）: {e}")
 
+        # === AI 产业链扫描 ===
+        try:
+            if getattr(args, 'chain_scan', False):
+                logger.info("开始 AI 产业链扫描...")
+                from src.industry_chain.cli import main as chain_main
+                import sys as _sys
+                _sys.argv = ["industry_chain", "scan", "--compact"]
+                chain_main()
+        except Exception as e:
+            logger.warning(f"AI 产业链扫描失败（已忽略）: {e}")
+
     except Exception as e:
         logger.exception(f"分析流程执行失败: {e}")
 
@@ -1245,6 +1268,14 @@ def main() -> int:
             sector_service = SectorInflectionService()
             sector_service.run_daily_scan(force=True)
             return 0
+
+        # 模式1.6: 仅 AI 产业链扫描
+        if getattr(args, 'chain_scan_only', False):
+            logger.info("模式: 仅 AI 产业链扫描")
+            from src.industry_chain.cli import main as chain_main
+            import sys as _sys
+            _sys.argv = ["industry_chain", "scan"]
+            return chain_main()
 
         # 模式1: 仅大盘复盘
         if args.market_review:
